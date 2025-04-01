@@ -18,7 +18,7 @@ export default function TemplatesPage() {
   const capture = usePostHogClientCapture();
   const hasWriteAccess = useHasProjectAccess({
     projectId,
-    scope: "evalTemplate:create",
+    scope: "evalTemplate:CUD",
   });
 
   const hasReadAccess = useHasProjectAccess({
@@ -33,7 +33,7 @@ export default function TemplatesPage() {
   return (
     <Page
       headerProps={{
-        title: "Eval Templates",
+        title: "Evaluators",
         help: {
           description:
             "Create an evaluation template. Choose from one of the pre-defined templates or create your own.",
@@ -41,7 +41,7 @@ export default function TemplatesPage() {
         },
         tabsComponent: (
           <TabsBar value="templates">
-            <TabsBarList className="justify-start">
+            <TabsBarList>
               <TabsBarTrigger value="evaluators" asChild>
                 <Link href={`/project/${projectId}/evals`}>Evaluators</Link>
               </TabsBarTrigger>
@@ -57,7 +57,7 @@ export default function TemplatesPage() {
             disabled={!hasWriteAccess}
             onClick={() => capture("eval_templates:new_form_open")}
             asChild
-            variant="outline"
+            variant="default"
           >
             <Link
               href={

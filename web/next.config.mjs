@@ -80,6 +80,16 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // Add noindex for all pages except root and /auth*
+        source: "/:path((?!auth|^$).*)*",
+        headers: [
+          {
+            key: "X-Robots-Tag",
+            value: "noindex",
+          },
+        ],
+      },
+      {
         source: "/:path*",
         headers: [
           {
@@ -170,6 +180,9 @@ const nextConfig = {
       layers: true,
     };
 
+    // Exclude Datadog packages from webpack bundling to avoid issues
+    config.externals.push("@datadog/pprof", "dd-trace");
+
     return config;
   },
 };
@@ -201,7 +214,7 @@ export default withSentryConfig(nextConfig, {
   // This can increase your server load as well as your hosting bill.
   // Note: Check that the configured route will not match with your Next.js middleware, otherwise reporting of client-
   // side errors will fail.
-  // tunnelRoute: "/api/monitoring-tunnel",
+  tunnelRoute: "/api/monitoring-tunnel",
 
   // Hides source maps from generated client bundles
   hideSourceMaps: true,

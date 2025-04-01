@@ -23,6 +23,7 @@ import {
   StorageService,
   StorageServiceFactory,
   CreateEvalQueueEventType,
+  ChatMessageType,
 } from "@langfuse/shared/src/server";
 import {
   availableTraceEvalVariables,
@@ -156,7 +157,7 @@ export const createEvalJobs = async ({
         >(Prisma.sql`
           SELECT dataset_item_id as id
           FROM dataset_run_items as dri
-          JOIN dataset_items as di ON di.id = dri.dataset_item_id
+          JOIN dataset_items as di ON di.id = dri.dataset_item_id AND di.project_id = ${event.projectId}
           WHERE dri.project_id = ${event.projectId}
             AND dri.trace_id = ${event.traceId}
             ${condition}
@@ -176,9 +177,8 @@ export const createEvalJobs = async ({
       const observationExists = await checkObservationExists(
         event.projectId,
         observationId,
-        new Date(),
+        "timestamp" in event ? new Date(event.timestamp) : new Date(),
       );
-
       if (!observationExists) {
         logger.warn(
           `Observation ${observationId} not found, retrying dataset eval later`,
@@ -306,7 +306,14 @@ export const evaluate = async ({
     .selectAll()
     .where("id", "=", event.jobExecutionId)
     .where("project_id", "=", event.projectId)
-    .executeTakeFirstOrThrow();
+    .executeTakeFirst();
+
+  if (!job) {
+    logger.info(
+      `Job execution with id ${event.jobExecutionId} for project ${event.projectId} not found. This was likely deleted by the user.`,
+    );
+    return;
+  }
 
   if (!job?.job_input_trace_id) {
     throw new ForbiddenError(
@@ -349,7 +356,7 @@ export const evaluate = async ({
     },
   });
 
-  logger.info(
+  logger.debug(
     `Evaluating job ${job.id} for project ${event.projectId} with template ${template.id}. Searching for context...`,
   );
 
@@ -370,6 +377,9 @@ export const evaluate = async ({
   logger.debug(
     `Evaluating job ${event.jobExecutionId} extracted variables ${JSON.stringify(mappingResult)} `,
   );
+
+  // Get environment from trace or observation variables
+  const environment = mappingResult.find((r) => r.environment)?.environment;
 
   // compile the prompt and send out the LLM request
   let prompt;
@@ -428,7 +438,13 @@ export const evaluate = async ({
     );
   }
 
-  const messages = [{ role: ChatMessageRole.User, content: prompt }];
+  const messages = [
+    {
+      type: ChatMessageType.User,
+      role: ChatMessageRole.User,
+      content: prompt,
+    } as const,
+  ];
 
   const parsedLLMOutput = await backOff(
     async () =>
@@ -461,6 +477,7 @@ export const evaluate = async ({
     value: parsedLLMOutput.score,
     comment: parsedLLMOutput.reasoning,
     source: ScoreSource.EVAL,
+    environment: environment ?? "default",
   };
 
   // Write score to S3 and ingest into queue for Clickhouse processing
@@ -542,7 +559,7 @@ export async function extractVariablesFromTracingData({
   // this here are variables which were inserted by users. Need to validate before DB query.
   variableMapping: z.infer<typeof variableMappingList>;
   datasetItemId?: string;
-}): Promise<{ var: string; value: string }[]> {
+}): Promise<{ var: string; value: string; environment?: string }[]> {
   return Promise.all(
     variables.map(async (variable) => {
       const mapping = variableMapping.find(
@@ -616,10 +633,7 @@ export async function extractVariablesFromTracingData({
           return { var: variable, value: "" };
         }
 
-        const trace: Record<string, unknown> | undefined = await getTraceById(
-          traceId,
-          projectId,
-        );
+        const trace = await getTraceById(traceId, projectId);
 
         // user facing errors
         if (!trace) {
@@ -634,6 +648,7 @@ export async function extractVariablesFromTracingData({
         return {
           var: variable,
           value: parseDatabaseRowToString(trace, mapping),
+          environment: trace.environment,
         };
       }
 
@@ -656,7 +671,7 @@ export async function extractVariablesFromTracingData({
           return { var: variable, value: "" };
         }
 
-        const observation: Record<string, unknown> | undefined = (
+        const observation = (
           await getObservationForTraceIdByName(
             traceId,
             projectId,
@@ -678,7 +693,8 @@ export async function extractVariablesFromTracingData({
 
         return {
           var: variable,
-          value: parseUnknownToString(observation[mapping.selectedColumnId]),
+          value: parseDatabaseRowToString(observation, mapping),
+          environment: observation.environment,
         };
       }
 

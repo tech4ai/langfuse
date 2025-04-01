@@ -5,6 +5,7 @@ import { throwIfNoProjectAccess } from "@/src/features/rbac/utils/checkProjectAc
 import {
   createTRPCRouter,
   protectedProjectProcedure,
+  protectedProjectProcedureWithoutTracing,
 } from "@/src/server/api/trpc";
 import {
   type ChatMessage,
@@ -15,6 +16,7 @@ import {
 } from "@langfuse/shared";
 import { encrypt } from "@langfuse/shared/encryption";
 import {
+  ChatMessageType,
   fetchLLMCompletion,
   LLMAdapter,
   logger,
@@ -27,7 +29,7 @@ export function getDisplaySecretKey(secretKey: string) {
 }
 
 export const llmApiKeyRouter = createTRPCRouter({
-  create: protectedProjectProcedure
+  create: protectedProjectProcedureWithoutTracing
     .input(CreateLlmApiKey)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -150,7 +152,7 @@ export const llmApiKeyRouter = createTRPCRouter({
       };
     }),
 
-  test: protectedProjectProcedure
+  test: protectedProjectProcedureWithoutTracing
     .input(CreateLlmApiKey)
     .mutation(async ({ input }) => {
       try {
@@ -169,8 +171,16 @@ export const llmApiKeyRouter = createTRPCRouter({
         }
 
         const testMessages: ChatMessage[] = [
-          { role: ChatMessageRole.System, content: "You are a bot" },
-          { role: ChatMessageRole.User, content: "How are you?" },
+          {
+            role: ChatMessageRole.System,
+            content: "You are a bot",
+            type: ChatMessageType.System,
+          },
+          {
+            role: ChatMessageRole.User,
+            content: "How are you?",
+            type: ChatMessageType.User,
+          },
         ];
 
         await fetchLLMCompletion({

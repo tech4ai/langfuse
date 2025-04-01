@@ -104,6 +104,8 @@ export function CreateLLMApiKeyForm({
         return customization?.defaultBaseUrlAzure ?? "";
       case LLMAdapter.Anthropic:
         return customization?.defaultBaseUrlAnthropic ?? "";
+      case LLMAdapter.Atla:
+        return "https://api.atla-ai.com/v1/integrations/langfuse";
       default:
         return "";
     }
@@ -199,7 +201,7 @@ export function CreateLLMApiKeyForm({
       if (!testResult.success) throw new Error(testResult.error);
     } catch (error) {
       console.error(error);
-      form.setError("secretKey", {
+      form.setError("root", {
         type: "manual",
         message:
           error instanceof Error
@@ -310,6 +312,13 @@ export function CreateLLMApiKeyForm({
                       /v1/messages)
                     </span>
                   )}
+                  {currentAdapter === LLMAdapter.Atla && (
+                    <span className="text-dark-yellow">
+                      <br />
+                      Please use the Atla default base URL:
+                      https://api.atla-ai.com/v1/integrations/langfuse
+                    </span>
+                  )}
                 </FormDescription>
 
                 <FormControl>
@@ -409,7 +418,8 @@ export function CreateLLMApiKeyForm({
         )}
 
         {/* Extra Headers */}
-        {currentAdapter === "openai" ? (
+        {currentAdapter === LLMAdapter.OpenAI ||
+        currentAdapter === LLMAdapter.Azure ? (
           <FormField
             control={form.control}
             name="extraHeaders"
@@ -531,13 +541,13 @@ export function CreateLLMApiKeyForm({
               {currentAdapter === LLMAdapter.Bedrock && (
                 <FormDescription className="text-dark-yellow">
                   {
-                    "For Bedrock, the model name is the Bedrock model ID, e.g. 'eu.anthropic.claude-3-5-sonnet-20240620-v1:0'"
+                    "For Bedrock, the model name is the Bedrock Inference Profile ID, e.g. 'eu.anthropic.claude-3-5-sonnet-20240620-v1:0'"
                   }
                 </FormDescription>
               )}
 
               {fields.map((customModel, index) => (
-                <span key={index} className="flex flex-row space-x-2">
+                <span key={customModel.id} className="flex flex-row space-x-2">
                   <Input
                     {...form.register(`customModels.${index}.value`)}
                     placeholder={`Custom model name ${index + 1}`}
@@ -551,7 +561,6 @@ export function CreateLLMApiKeyForm({
                   </Button>
                 </span>
               ))}
-
               <Button
                 type="button"
                 variant="ghost"
@@ -576,7 +585,9 @@ export function CreateLLMApiKeyForm({
           Save new LLM API key
         </Button>
 
-        <FormMessage />
+        {form.formState.errors.root && (
+          <FormMessage>{form.formState.errors.root.message}</FormMessage>
+        )}
       </form>
     </Form>
   );

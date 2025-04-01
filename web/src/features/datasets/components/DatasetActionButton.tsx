@@ -1,4 +1,4 @@
-import { Button } from "@/src/components/ui/button";
+import { Button, type ButtonProps } from "@/src/components/ui/button";
 import { Edit, LockIcon, PlusIcon, Trash } from "lucide-react";
 import {
   Dialog,
@@ -18,7 +18,8 @@ interface BaseDatasetButtonProps {
   mode: "create" | "update" | "delete";
   projectId: string;
   className?: string;
-  onFormSuccess?: () => void;
+  size?: ButtonProps["size"];
+  variant?: ButtonProps["variant"];
 }
 
 interface CreateDatasetButtonProps extends BaseDatasetButtonProps {
@@ -59,8 +60,8 @@ export const DatasetActionButton = (props: DatasetActionButtonProps) => {
         {props.mode === "update" ? (
           props.icon ? (
             <Button
-              variant="outline"
-              size={"icon"}
+              variant={props.variant || "outline"}
+              size={props.size || "icon"}
               className={props.className}
               disabled={!hasAccess}
               onClick={() =>
@@ -73,7 +74,10 @@ export const DatasetActionButton = (props: DatasetActionButtonProps) => {
             </Button>
           ) : (
             <Button
-              variant="ghost"
+              variant={props.variant || "ghost"}
+              size={props.size || "icon"}
+              className={props.className}
+              disabled={!hasAccess}
               onClick={() => {
                 setOpen(true);
                 capture("datasets:update_form_open", {
@@ -91,7 +95,10 @@ export const DatasetActionButton = (props: DatasetActionButtonProps) => {
           )
         ) : props.mode === "delete" ? (
           <Button
-            variant="ghost"
+            variant={props.variant || "ghost"}
+            size={props.size}
+            className={props.className}
+            disabled={!hasAccess}
             onClick={() => {
               setOpen(true);
               capture("datasets:delete_form_open", {
@@ -99,15 +106,20 @@ export const DatasetActionButton = (props: DatasetActionButtonProps) => {
               });
             }}
           >
-            <Trash className="mr-2 h-4 w-4" />
+            {hasAccess ? (
+              <Trash className="mr-2 h-4 w-4" />
+            ) : (
+              <LockIcon className="mr-2 h-4 w-4" aria-hidden="true" />
+            )}
             Delete
           </Button>
         ) : (
           <Button
+            size={props.size}
             className={props.className}
             disabled={!hasAccess}
             onClick={() => capture("datasets:new_form_open")}
-            variant="secondary"
+            variant={props.variant || "default"}
           >
             {hasAccess ? (
               <PlusIcon className="-ml-0.5 mr-1.5 h-4 w-4" aria-hidden="true" />

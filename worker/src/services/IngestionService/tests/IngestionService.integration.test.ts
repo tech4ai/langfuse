@@ -23,6 +23,7 @@ import { IngestionService } from "../../IngestionService";
 import { ModelUsageUnit, ScoreSource } from "@langfuse/shared";
 
 const projectId = "7a88fb47-b4e2-43b8-a06c-a5ce950dc53a";
+const environment = "default";
 const IngestionEventBatchSchema = z.array(ingestionEvent);
 
 describe("Ingestion end-to-end tests", () => {
@@ -32,6 +33,7 @@ describe("Ingestion end-to-end tests", () => {
   beforeEach(async () => {
     if (!redis) throw new Error("Redis not initialized");
     await pruneDatabase();
+    await redis.flushall();
 
     clickhouseWriter = ClickhouseWriter.getInstance();
 
@@ -66,6 +68,7 @@ describe("Ingestion end-to-end tests", () => {
         body: {
           name: traceName,
           timestamp,
+          environment,
         },
       },
     ];
@@ -343,6 +346,88 @@ describe("Ingestion end-to-end tests", () => {
         output_reasoning_tokens: 4,
       },
     },
+    {
+      usage: null,
+      usageDetails: {
+        prompt_tokens: 5,
+        completion_tokens: 11,
+        total_tokens: 16,
+        prompt_tokens_details: {
+          cached_tokens: 2,
+          audio_tokens: null,
+          image_tokens: undefined,
+        },
+        completion_tokens_details: {
+          text_tokens: 3,
+          audio_tokens: undefined,
+          reasoning_tokens: 4,
+          image_tokens: null,
+        },
+      },
+      expectedUsageDetails: {
+        input: 3,
+        output: 4,
+        total: 16,
+        input_cached_tokens: 2,
+        output_text_tokens: 3,
+        output_reasoning_tokens: 4,
+      },
+    },
+    // OpenAI Response API format
+    {
+      usage: null,
+      usageDetails: {
+        input_tokens: 5,
+        output_tokens: 11,
+        total_tokens: 16,
+        input_tokens_details: {
+          cached_tokens: 2,
+          audio_tokens: 3,
+        },
+        output_tokens_details: {
+          text_tokens: 3,
+          audio_tokens: 4,
+          reasoning_tokens: 4,
+        },
+      },
+      expectedUsageDetails: {
+        input: 0,
+        output: 0,
+        total: 16,
+        input_cached_tokens: 2,
+        input_audio_tokens: 3,
+        output_text_tokens: 3,
+        output_audio_tokens: 4,
+        output_reasoning_tokens: 4,
+      },
+    },
+    {
+      usage: null,
+      usageDetails: {
+        input_tokens: 5,
+        output_tokens: 11,
+        total_tokens: 16,
+        input_tokens_details: {
+          cached_tokens: 2,
+          audio_tokens: null,
+          image_tokens: undefined,
+        },
+        output_tokens_details: {
+          text_tokens: 3,
+          audio_tokens: null,
+          reasoning_tokens: 4,
+          image_tokens: undefined,
+        },
+      },
+      expectedUsageDetails: {
+        input: 3,
+        output: 4,
+        total: 16,
+        input_cached_tokens: 2,
+        output_text_tokens: 3,
+        output_reasoning_tokens: 4,
+      },
+    },
   ].forEach((testConfig) => {
     it(`should create trace, generation and score without matching models ${JSON.stringify(
       testConfig,
@@ -368,6 +453,7 @@ describe("Ingestion end-to-end tests", () => {
             release: "1.0.0",
             version: "2.0.0",
             tags: ["tag-1", "tag-2"],
+            environment,
           },
         },
       ];
@@ -388,6 +474,7 @@ describe("Ingestion end-to-end tests", () => {
               input: { key: "value" },
               metadata: { key: "value" },
               version: "2.0.0",
+              environment,
             },
           },
           {
@@ -400,6 +487,7 @@ describe("Ingestion end-to-end tests", () => {
               usage: testConfig.usage,
               usageDetails: testConfig.usageDetails,
               costDetails: testConfig.costDetails,
+              environment,
             },
           },
         ]);
@@ -419,6 +507,7 @@ describe("Ingestion end-to-end tests", () => {
             input: { input: "value" },
             metadata: { meta: "value" },
             version: "2.0.0",
+            environment,
           },
         },
       ];
@@ -435,6 +524,7 @@ describe("Ingestion end-to-end tests", () => {
             value: 100.5,
             source: ScoreSource.EVAL,
             traceId: traceId,
+            environment,
           },
         },
       ];
@@ -755,6 +845,7 @@ describe("Ingestion end-to-end tests", () => {
             id: traceId,
             name: "trace-name",
             timestamp: new Date().toISOString(),
+            environment,
           },
         },
       ];
@@ -775,6 +866,7 @@ describe("Ingestion end-to-end tests", () => {
             },
             input: "This is a great prompt",
             output: "This is a great gpt output",
+            environment,
           },
         },
       ];
@@ -836,6 +928,7 @@ describe("Ingestion end-to-end tests", () => {
         body: {
           id: traceId,
           timestamp: new Date().toISOString(),
+          environment,
         },
       },
     ];
@@ -849,6 +942,7 @@ describe("Ingestion end-to-end tests", () => {
           id: spanId,
           traceId: traceId,
           startTime: new Date().toISOString(),
+          environment,
         },
       },
       {
@@ -860,6 +954,7 @@ describe("Ingestion end-to-end tests", () => {
           traceId: traceId,
           name: "span-name",
           startTime: new Date().toISOString(),
+          environment,
         },
       },
     ];
@@ -874,6 +969,7 @@ describe("Ingestion end-to-end tests", () => {
           traceId: traceId,
           startTime: new Date().toISOString(),
           parentObservationId: spanId,
+          environment: environment,
           modelParameters: { someKey: ["user-1", "user-2"] },
         },
       },
@@ -885,6 +981,7 @@ describe("Ingestion end-to-end tests", () => {
           id: generationId,
           name: "generation-name",
           startTime: new Date().toISOString(),
+          environment,
         },
       },
     ];
@@ -900,6 +997,7 @@ describe("Ingestion end-to-end tests", () => {
           name: "event-name",
           startTime: new Date().toISOString(),
           parentObservationId: generationId,
+          environment,
         },
       },
     ];
@@ -917,6 +1015,7 @@ describe("Ingestion end-to-end tests", () => {
           source: ScoreSource.API,
           value: 100.5,
           observationId: generationId,
+          environment,
         },
       },
     ];
@@ -1014,6 +1113,7 @@ describe("Ingestion end-to-end tests", () => {
           release: "1.0.0",
           version: "2.0.0",
           tags: ["tag-1", "tag-2", "tag-2"],
+          environment,
         },
       },
     ];
@@ -1038,6 +1138,7 @@ describe("Ingestion end-to-end tests", () => {
           name: "trace-name",
           userId: "user-2",
           tags: ["tag-1", "tag-4", "tag-3"],
+          environment,
         },
       },
     ];
@@ -1084,6 +1185,7 @@ describe("Ingestion end-to-end tests", () => {
           timestamp: latestEvent.toISOString(),
           name: "trace-name",
           userId: "user-1",
+          environment,
         },
       },
       {
@@ -1095,6 +1197,7 @@ describe("Ingestion end-to-end tests", () => {
           timestamp: new Date(oldEvent).toISOString(),
           name: "trace-name",
           userId: "user-2",
+          environment,
         },
       },
     ];
@@ -1177,6 +1280,7 @@ describe("Ingestion end-to-end tests", () => {
             max_tokens: 1000,
           },
           usage: null,
+          environment,
         },
       },
       {
@@ -1195,6 +1299,7 @@ describe("Ingestion end-to-end tests", () => {
             total: -3,
             unit: "TOKENS",
           },
+          environment,
         },
       },
     ];
@@ -1291,6 +1396,7 @@ describe("Ingestion end-to-end tests", () => {
             max_tokens: 1000,
           },
           usage: null,
+          environment,
         },
       },
       {
@@ -1309,6 +1415,7 @@ describe("Ingestion end-to-end tests", () => {
             total: 1313,
             unit: "TOKENS",
           },
+          environment,
         },
       },
     ];
@@ -1364,6 +1471,7 @@ describe("Ingestion end-to-end tests", () => {
           startTime: new Date().toISOString(),
           output: "to overwrite",
           usage: undefined,
+          environment,
         },
       },
     ];
@@ -1386,6 +1494,7 @@ describe("Ingestion end-to-end tests", () => {
           traceId: traceId,
           output: "overwritten",
           usage: undefined,
+          environment,
         },
       },
     ];
@@ -1421,6 +1530,7 @@ describe("Ingestion end-to-end tests", () => {
           type: "GENERATION",
           startTime: new Date().toISOString(),
           output: { key: "this is a great gpt output" },
+          environment,
         },
       },
       {
@@ -1435,6 +1545,7 @@ describe("Ingestion end-to-end tests", () => {
           input: { key: "value" },
           output: "should be overwritten",
           model: "gpt-3.5",
+          environment,
         },
       },
     ];
@@ -1480,6 +1591,7 @@ describe("Ingestion end-to-end tests", () => {
           timestamp,
           name: "trace-name",
           userId: "user-1",
+          environment,
         },
       },
     ];
@@ -1496,6 +1608,7 @@ describe("Ingestion end-to-end tests", () => {
           startTime: new Date().toISOString(),
           name: "LiteLLM.run",
           // usage: null,
+          environment,
         },
       },
     ];
@@ -1544,6 +1657,7 @@ describe("Ingestion end-to-end tests", () => {
             outputCost: 0.0007695,
             totalCost: 0.001412,
           },
+          environment,
         },
       },
     ];
@@ -1608,6 +1722,7 @@ describe("Ingestion end-to-end tests", () => {
           name: "trace-name",
           timestamp: new Date().toISOString(),
           userId: "user-1",
+          environment,
         },
       },
     ];
@@ -1625,6 +1740,7 @@ describe("Ingestion end-to-end tests", () => {
           name: "generation-name",
           input: { key: "value" },
           model: "gpt-3.5",
+          environment,
         },
       },
       {
@@ -1635,6 +1751,7 @@ describe("Ingestion end-to-end tests", () => {
           id: generationId,
           type: "GENERATION",
           output: { key: "this is a great gpt output" },
+          environment,
         },
       },
     ];
@@ -1710,6 +1827,7 @@ describe("Ingestion end-to-end tests", () => {
           name: "trace-name",
           timestamp: new Date().toISOString(),
           userId: "user-1",
+          environment,
         },
       },
     ];
@@ -1723,6 +1841,7 @@ describe("Ingestion end-to-end tests", () => {
           id: generationId,
           type: "GENERATION",
           output: { key: "this is a great gpt output" },
+          environment,
         },
       },
       {
@@ -1737,6 +1856,7 @@ describe("Ingestion end-to-end tests", () => {
           name: "generation-name",
           input: { key: "value" },
           model: "gpt-3.5",
+          environment,
         },
       },
     ];
@@ -1795,6 +1915,7 @@ describe("Ingestion end-to-end tests", () => {
           metadata: { key: "value" },
           release: "1.0.0",
           version: "2.0.0",
+          environment,
         },
       },
       {
@@ -1808,6 +1929,7 @@ describe("Ingestion end-to-end tests", () => {
           // Do not set user_id here to validate behaviour for missing fields
           release: null,
           version: undefined,
+          environment,
         },
       },
     ];
@@ -1899,6 +2021,7 @@ describe("Ingestion end-to-end tests", () => {
             timestamp: new Date().toISOString(),
             userId: "user-1",
             metadata: inputs[0],
+            environment,
           },
         },
         {
@@ -1910,6 +2033,7 @@ describe("Ingestion end-to-end tests", () => {
             name: "trace-name",
             timestamp: new Date().toISOString(),
             metadata: inputs[1],
+            environment,
           },
         },
       ];
@@ -1926,6 +2050,7 @@ describe("Ingestion end-to-end tests", () => {
             type: "GENERATION",
             name: "generation-name",
             metadata: inputs[0],
+            environment,
           },
         },
         {
@@ -1938,6 +2063,7 @@ describe("Ingestion end-to-end tests", () => {
             startTime: new Date().toISOString(),
             type: "GENERATION",
             metadata: inputs[1],
+            environment,
           },
         },
       ];

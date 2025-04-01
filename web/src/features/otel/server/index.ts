@@ -128,7 +128,58 @@ const extractInputAndOutput = (
       event.name === "gen_ai.content.completion",
   )?.attributes;
   if (input || output) {
+    input =
+      input?.reduce((acc: any, attr: any) => {
+        acc[attr.key] = convertValueToPlainJavascript(attr.value);
+        return acc;
+      }, {}) ?? {};
+    output =
+      output?.reduce((acc: any, attr: any) => {
+        acc[attr.key] = convertValueToPlainJavascript(attr.value);
+        return acc;
+      }, {}) ?? {};
+    // Here, we are interested in the attributes of the event. Usually gen_ai.prompt and gen_ai.completion.
+    // We can use the current function again to extract them from the event attributes.
+    const { input: eventInput } = extractInputAndOutput([], input);
+    const { output: eventOutput } = extractInputAndOutput([], output);
+    return { input: eventInput || input, output: eventOutput || output };
+  }
+
+  // Logfire uses `prompt` and `all_messages_events` property on spans
+  input = attributes["prompt"];
+  output = attributes["all_messages_events"];
+  if (input || output) {
     return { input, output };
+  }
+
+  // Logfire uses single `events` array for GenAI events.
+  const eventsArray = attributes["events"];
+  if (typeof eventsArray === "string" || Array.isArray(eventsArray)) {
+    let events = eventsArray as any[];
+    if (typeof eventsArray === "string") {
+      try {
+        events = JSON.parse(eventsArray);
+      } catch (e) {
+        // fallthrough
+        events = [];
+      }
+    }
+
+    // Find the gen_ai.choice event for output
+    const choiceEvent = events.find(
+      (event) => event["event.name"] === "gen_ai.choice",
+    );
+    // All other events are considered input
+    const inputEvents = events.filter(
+      (event) => event["event.name"] !== "gen_ai.choice",
+    );
+
+    if (choiceEvent || inputEvents.length > 0) {
+      return {
+        input: inputEvents.length > 0 ? inputEvents : null,
+        output: choiceEvent || null,
+      };
+    }
   }
 
   // MLFlow sets mlflow.spanInputs and mlflow.spanOutputs
@@ -148,6 +199,13 @@ const extractInputAndOutput = (
   // SmolAgents sets input.value and output.value
   input = attributes["input.value"];
   output = attributes["output.value"];
+  if (input || output) {
+    return { input, output };
+  }
+
+  // Pydantic uses input and output
+  input = attributes["input"];
+  output = attributes["output"];
   if (input || output) {
     return { input, output };
   }
@@ -175,6 +233,76 @@ const extractInputAndOutput = (
   }
 
   return { input: null, output: null };
+};
+
+const extractEnvironment = (
+  attributes: Record<string, unknown>,
+  resourceAttributes: Record<string, unknown>,
+): string => {
+  const environmentAttributeKeys = [
+    "langfuse.environment",
+    "deployment.environment.name",
+    "deployment.environment",
+  ];
+  for (const key of environmentAttributeKeys) {
+    if (resourceAttributes[key]) {
+      return resourceAttributes[key] as string;
+    }
+    if (attributes[key]) {
+      return attributes[key] as string;
+    }
+  }
+  return "default";
+};
+
+const extractName = (
+  spanName: string,
+  attributes: Record<string, unknown>,
+): string => {
+  const nameKeys = ["logfire.msg"];
+  for (const key of nameKeys) {
+    if (attributes[key]) {
+      return typeof attributes[key] === "string"
+        ? (attributes[key] as string)
+        : JSON.stringify(attributes[key]);
+    }
+  }
+  return spanName;
+};
+
+const extractMetadata = (
+  attributes: Record<string, unknown>,
+): Record<string, unknown> => {
+  // Extract top-level metadata object if available
+  let metadata: Record<string, unknown> = {};
+  if (attributes["langfuse.metadata"]) {
+    try {
+      // If it's a string (JSON), parse it
+      if (typeof attributes["langfuse.metadata"] === "string") {
+        metadata = JSON.parse(attributes["langfuse.metadata"] as string);
+      }
+      // If it's already an object, use it
+      else if (typeof attributes["langfuse.metadata"] === "object") {
+        metadata = attributes["langfuse.metadata"] as Record<string, unknown>;
+      }
+    } catch (e) {
+      // If parsing fails, continue with nested metadata extraction
+    }
+  }
+
+  // Extract metadata from langfuse.metadata.* keys
+  const metadataAttributes = Object.keys(attributes).filter((key) =>
+    key.startsWith("langfuse.metadata."),
+  );
+
+  return {
+    ...metadata,
+    ...metadataAttributes.reduce((acc: Record<string, unknown>, key) => {
+      const metadataKey = key.replace("langfuse.metadata.", "");
+      acc[metadataKey] = attributes[key];
+      return acc;
+    }, {}),
+  };
 };
 
 const extractUserId = (
@@ -210,6 +338,14 @@ const extractModelParameters = (
   if (attributes["llm.invocation_parameters"]) {
     try {
       return JSON.parse(attributes["llm.invocation_parameters"] as string);
+    } catch (e) {
+      // fallthrough
+    }
+  }
+
+  if (attributes["model_config"]) {
+    try {
+      return JSON.parse(attributes["model_config"] as string);
     } catch (e) {
       // fallthrough
     }
@@ -266,7 +402,11 @@ const extractUsageDetails = (
       .replace("llm.token_count.", "");
     const mappedUsageDetailKey =
       usageDetailKeyMapping[usageDetailKey] ?? usageDetailKey;
-    acc[mappedUsageDetailKey] = attributes[key];
+    // Cast the respective key to a number
+    const value = Number(attributes[key]);
+    if (!Number.isNaN(value)) {
+      acc[mappedUsageDetailKey] = value;
+    }
     return acc;
   }, {});
 };
@@ -305,13 +445,23 @@ export const convertOtelSpanToIngestionEvent = (
           return acc;
         }, {}) ?? {};
 
-      if (!span?.parentSpanId) {
+      const parentObservationId = span?.parentSpanId
+        ? Buffer.from(span.parentSpanId?.data ?? span.parentSpanId).toString(
+            "hex",
+          )
+        : null;
+
+      const spanAttributeMetadata = extractMetadata(attributes);
+      const resourceAttributeMetadata = extractMetadata(resourceAttributes);
+      if (!parentObservationId) {
         // Create a trace for any root span
         const trace = {
           id: Buffer.from(span.traceId?.data ?? span.traceId).toString("hex"),
           timestamp: convertNanoTimestampToISO(span.startTimeUnixNano),
-          name: span.name,
+          name: extractName(span.name, attributes),
           metadata: {
+            ...resourceAttributeMetadata,
+            ...spanAttributeMetadata,
             attributes,
             resourceAttributes,
             scope: scopeSpan?.scope,
@@ -327,6 +477,8 @@ export const convertOtelSpanToIngestionEvent = (
             attributes?.["langfuse.public"] === true ||
             attributes?.["langfuse.public"] === "true",
           tags: attributes?.["langfuse.tags"] ?? [],
+
+          environment: extractEnvironment(attributes, resourceAttributes),
 
           // Input and Output
           ...extractInputAndOutput(span?.events ?? [], attributes),
@@ -345,17 +497,17 @@ export const convertOtelSpanToIngestionEvent = (
         traceId: Buffer.from(span.traceId?.data ?? span.traceId).toString(
           "hex",
         ),
-        parentObservationId: span?.parentSpanId
-          ? Buffer.from(span.parentSpanId?.data ?? span.parentSpanId).toString(
-              "hex",
-            )
-          : null,
-        name: span.name,
+        parentObservationId,
+        name: extractName(span.name, attributes),
         startTime: convertNanoTimestampToISO(span.startTimeUnixNano),
         endTime: convertNanoTimestampToISO(span.endTimeUnixNano),
 
+        environment: extractEnvironment(attributes, resourceAttributes),
+
         // Additional fields
         metadata: {
+          ...resourceAttributeMetadata,
+          ...spanAttributeMetadata,
           attributes,
           resourceAttributes,
           scope: scopeSpan?.scope,
@@ -385,7 +537,10 @@ export const convertOtelSpanToIngestionEvent = (
       // If the span has a model property, we consider it a generation.
       // Just checking for llm.* or gen_ai.* attributes leads to overreporting and wrong
       // aggregations for costs.
-      const isGeneration = Boolean(observation.model);
+      const isGeneration =
+        Boolean(observation.model) ||
+        ("openinference.span.kind" in attributes &&
+          attributes["openinference.span.kind"] === "LLM");
       events.push({
         id: randomUUID(),
         type: isGeneration ? "generation-create" : "span-create",

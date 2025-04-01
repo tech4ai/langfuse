@@ -114,6 +114,7 @@ export const getObservationsViewForTrace = async (
     project_id,
     type,
     parent_observation_id,
+    environment,
     start_time,
     end_time,
     name,
@@ -177,6 +178,7 @@ export const getObservationForTraceIdByName = async (
     project_id,
     type,
     parent_observation_id,
+    environment,
     start_time,
     end_time,
     name,
@@ -342,6 +344,7 @@ const getObservationByIdInternal = async (
     id,
     trace_id,
     project_id,
+    environment,
     type,
     parent_observation_id,
     start_time,
@@ -507,6 +510,7 @@ const getObservationsTableInternal = async <T>(
         o.provided_cost_details as "provided_cost_details",
         o.cost_details as "cost_details",
         o.level as level,
+        o.environment as "environment",
         o.status_message as "status_message",
         o.version as version,
         o.parent_observation_id as "parent_observation_id",
@@ -1136,6 +1140,7 @@ export const getObservationMetricsForPrompts = async (
 export const getLatencyAndTotalCostForObservations = async (
   projectId: string,
   observationIds: string[],
+  timestamp?: Date,
 ) => {
   const query = `
     SELECT
@@ -1144,7 +1149,8 @@ export const getLatencyAndTotalCostForObservations = async (
         dateDiff('millisecond', start_time, end_time) AS latency_ms
     FROM observations FINAL 
     WHERE project_id = {projectId: String} 
-    AND id IN ({observationIds: Array(String)})
+    AND id IN ({observationIds: Array(String)}) 
+    ${timestamp ? `AND start_time >= {timestamp: DateTime64(3)}` : ""}
 `;
   const rows = await queryClickhouse<{
     id: string;
@@ -1155,6 +1161,9 @@ export const getLatencyAndTotalCostForObservations = async (
     params: {
       projectId,
       observationIds,
+      ...(timestamp
+        ? { timestamp: convertDateToClickhouseDateTime(timestamp) }
+        : {}),
     },
     tags: {
       feature: "tracing",
@@ -1174,6 +1183,7 @@ export const getLatencyAndTotalCostForObservations = async (
 export const getLatencyAndTotalCostForObservationsByTraces = async (
   projectId: string,
   traceIds: string[],
+  timestamp?: Date,
 ) => {
   const query = `
     SELECT
@@ -1183,6 +1193,7 @@ export const getLatencyAndTotalCostForObservationsByTraces = async (
     FROM observations FINAL
     WHERE project_id = {projectId: String} 
     AND trace_id IN ({traceIds: Array(String)})
+    ${timestamp ? `AND start_time >= {timestamp: DateTime64(3)}` : ""}
     GROUP BY trace_id
 `;
   const rows = await queryClickhouse<{
@@ -1194,6 +1205,9 @@ export const getLatencyAndTotalCostForObservationsByTraces = async (
     params: {
       projectId,
       traceIds,
+      ...(timestamp
+        ? { timestamp: convertDateToClickhouseDateTime(timestamp) }
+        : {}),
     },
     tags: {
       feature: "tracing",
@@ -1310,6 +1324,59 @@ export const getTraceIdsForObservations = async (
   }));
 };
 
+export const getObservationsForBlobStorageExport = function (
+  projectId: string,
+  minTimestamp: Date,
+  maxTimestamp: Date,
+) {
+  const query = `
+    SELECT
+      id,
+      trace_id,
+      project_id,
+      environment,
+      type,
+      parent_observation_id,
+      start_time,
+      end_time,
+      name,
+      metadata,
+      level,
+      status_message,
+      version,
+      input,
+      output,
+      provided_model_name,
+      model_parameters,
+      usage_details,
+      cost_details,
+      completion_start_time,
+      prompt_name,
+      prompt_version
+    FROM observations FINAL
+    WHERE project_id = {projectId: String}
+    AND start_time >= {minTimestamp: DateTime64(3)}
+    AND start_time <= {maxTimestamp: DateTime64(3)}
+  `;
+
+  const records = queryClickhouseStream<Record<string, unknown>>({
+    query,
+    params: {
+      projectId,
+      minTimestamp: convertDateToClickhouseDateTime(minTimestamp),
+      maxTimestamp: convertDateToClickhouseDateTime(maxTimestamp),
+    },
+    tags: {
+      feature: "blobstorage",
+      type: "observation",
+      kind: "analytic",
+      projectId,
+    },
+  });
+
+  return records;
+};
+
 export const getGenerationsForPostHog = async function* (
   projectId: string,
   minTimestamp: Date,
@@ -1360,6 +1427,13 @@ export const getGenerationsForPostHog = async function* (
       type: "observation",
       kind: "analytic",
       projectId,
+    },
+    clickhouseConfigs: {
+      request_timeout: 300_000, // 5 minutes
+      clickhouse_settings: {
+        join_algorithm: "grace_hash",
+        grace_hash_join_initial_buckets: "32",
+      },
     },
   });
 

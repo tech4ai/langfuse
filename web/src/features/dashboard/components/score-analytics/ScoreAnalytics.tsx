@@ -25,7 +25,10 @@ export function ScoreAnalytics(props: {
   className?: string;
   agg: DashboardDateRangeAggregationOption;
   globalFilterState: FilterState;
+  fromTimestamp: Date;
+  toTimestamp: Date;
   projectId: string;
+  isLoading?: boolean;
 }) {
   // Stale score selections in localStorage are ignored as we only show scores that exist in scoreAnalyticsOptions
   const [selectedDashboardScoreKeys, setSelectedDashboardScoreKeys] =
@@ -45,6 +48,7 @@ export function ScoreAnalytics(props: {
           skipBatch: true,
         },
       },
+      enabled: !props.isLoading,
     },
   );
 
@@ -75,10 +79,11 @@ export function ScoreAnalytics(props: {
       className={props.className}
       title="Scores Analytics"
       description="Aggregate scores and averages over time"
-      isLoading={scoreKeysAndProps.isLoading}
+      isLoading={props.isLoading || scoreKeysAndProps.isLoading}
       headerClassName={"grid grid-cols-[1fr,auto,auto] items-center"}
       headerChildren={
         !scoreKeysAndProps.isLoading &&
+        !props.isLoading &&
         Boolean(scoreKeysAndProps.data?.length) && (
           <MultiSelectKeyValues
             placeholder="Search score..."
@@ -126,15 +131,17 @@ export function ScoreAnalytics(props: {
                         <DocPopup description="Aggregate of up to 10,000 scores" />
                       )}
                     </div>
-                    {(isCategoricalDataType(dataType) ||
-                      isBooleanDataType(dataType)) && (
+                    {isCategoricalDataType(dataType) && (
                       <CategoricalScoreChart
                         projectId={props.projectId}
                         scoreData={scoreData}
                         globalFilterState={props.globalFilterState}
+                        fromTimestamp={props.fromTimestamp}
+                        toTimestamp={props.toTimestamp}
                       />
                     )}
-                    {isNumericDataType(dataType) && (
+                    {(isNumericDataType(dataType) ||
+                      isBooleanDataType(dataType)) && (
                       <NumericScoreHistogram
                         projectId={props.projectId}
                         source={source}
@@ -151,16 +158,18 @@ export function ScoreAnalytics(props: {
                         ? "Moving average over time"
                         : "Scores over time"}
                     </div>
-                    {(isCategoricalDataType(dataType) ||
-                      isBooleanDataType(dataType)) && (
+                    {isCategoricalDataType(dataType) && (
                       <CategoricalScoreChart
                         projectId={props.projectId}
                         agg={props.agg}
                         scoreData={scoreData}
                         globalFilterState={props.globalFilterState}
+                        fromTimestamp={props.fromTimestamp}
+                        toTimestamp={props.toTimestamp}
                       />
                     )}
-                    {isNumericDataType(dataType) && (
+                    {(isNumericDataType(dataType) ||
+                      isBooleanDataType(dataType)) && (
                       <NumericScoreTimeSeriesChart
                         agg={props.agg}
                         source={source}
@@ -168,6 +177,8 @@ export function ScoreAnalytics(props: {
                         dataType={dataType}
                         projectId={props.projectId}
                         globalFilterState={props.globalFilterState}
+                        fromTimestamp={props.fromTimestamp}
+                        toTimestamp={props.toTimestamp}
                       />
                     )}
                   </div>

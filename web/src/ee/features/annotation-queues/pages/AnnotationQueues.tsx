@@ -4,6 +4,9 @@ import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAcces
 import { useHasEntitlement } from "@/src/features/entitlements/hooks";
 import { SupportOrUpgradePage } from "@/src/ee/features/billing/components/SupportOrUpgradePage";
 import Page from "@/src/components/layouts/page";
+import { AnnotationQueuesOnboarding } from "@/src/components/onboarding/AnnotationQueuesOnboarding";
+import { api } from "@/src/utils/api";
+import { CreateOrEditAnnotationQueueButton } from "@/src/ee/features/annotation-queues/components/CreateOrEditAnnotationQueueButton";
 
 export default function AnnotationQueues() {
   const router = useRouter();
@@ -13,6 +16,23 @@ export default function AnnotationQueues() {
     scope: "annotationQueues:read",
   });
   const hasEntitlement = useHasEntitlement("annotation-queues");
+
+  // Check if the user has any annotation queues
+  const { data: hasAnyQueue, isLoading } = api.annotationQueues.hasAny.useQuery(
+    { projectId },
+    {
+      enabled: !!projectId && hasEntitlement,
+      trpc: {
+        context: {
+          skipBatch: true,
+        },
+      },
+      refetchInterval: 10_000,
+    },
+  );
+
+  const showOnboarding = !isLoading && !hasAnyQueue;
+
   if (!hasAccess || !hasEntitlement) return <SupportOrUpgradePage />;
 
   return (
@@ -24,9 +44,21 @@ export default function AnnotationQueues() {
             "Annotation queues are used to manage scoring workflows for your LLM projects. See docs to learn more.",
           href: "https://langfuse.com/docs/scores/annotation",
         },
+        actionButtonsRight: (
+          <CreateOrEditAnnotationQueueButton
+            projectId={projectId}
+            variant="default"
+          />
+        ),
       }}
+      scrollable={showOnboarding}
     >
-      <AnnotationQueuesTable projectId={projectId} />
+      {/* Show onboarding screen if user has no annotation queues */}
+      {showOnboarding ? (
+        <AnnotationQueuesOnboarding projectId={projectId} />
+      ) : (
+        <AnnotationQueuesTable projectId={projectId} />
+      )}
     </Page>
   );
 }

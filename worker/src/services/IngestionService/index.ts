@@ -1,7 +1,6 @@
 import { Redis } from "ioredis";
 import { v4 } from "uuid";
 import { Prisma } from "@prisma/client";
-
 import {
   LangfuseNotFoundError,
   Model,
@@ -16,7 +15,6 @@ import {
   convertScoreReadToInsert,
   convertTraceReadToInsert,
   eventTypes,
-  findModel,
   IngestionEventType,
   instrumentAsync,
   logger,
@@ -50,6 +48,7 @@ import {
 } from "./utils";
 import { randomUUID } from "crypto";
 import { env } from "../../env";
+import { findModel } from "../modelMatch";
 
 type InsertRecord =
   | TraceRecordInsertType
@@ -61,13 +60,20 @@ const immutableEntityKeys: {
   [TableName.Scores]: (keyof ScoreRecordInsertType)[];
   [TableName.Observations]: (keyof ObservationRecordInsertType)[];
 } = {
-  [TableName.Traces]: ["id", "project_id", "timestamp", "created_at"],
+  [TableName.Traces]: [
+    "id",
+    "project_id",
+    "timestamp",
+    "created_at",
+    "environment",
+  ],
   [TableName.Scores]: [
     "id",
     "project_id",
     "timestamp",
     "trace_id",
     "created_at",
+    "environment",
   ],
   [TableName.Observations]: [
     "id",
@@ -75,6 +81,7 @@ const immutableEntityKeys: {
     "trace_id",
     "start_time",
     "created_at",
+    "environment",
   ],
 };
 
@@ -171,6 +178,7 @@ export class IngestionService {
           return {
             id: entityId,
             project_id: projectId,
+            environment: validatedScore.environment,
             timestamp: this.getMillisecondTimestamp(scoreEvent.timestamp),
             name: validatedScore.name,
             value: validatedScore.value,
@@ -411,6 +419,7 @@ export class IngestionService {
         id: finalObservationRecord.id,
         timestamp: finalObservationRecord.start_time,
         project_id: projectId,
+        environment: finalObservationRecord.environment,
         created_at: Date.now(),
         updated_at: Date.now(),
         metadata: {},
@@ -596,16 +605,12 @@ export class IngestionService {
     | {}
   > {
     const { projectId, observationRecord } = params;
-    const internalModel = await findModel({
-      event: {
-        projectId,
-        model: observationRecord.provided_model_name ?? undefined,
-      },
-    });
-
-    logger.debug(
-      `Found internal model name ${internalModel?.modelName} (id: ${internalModel?.id}) for observation ${observationRecord.id}`,
-    );
+    const internalModel = observationRecord.provided_model_name
+      ? await findModel({
+          projectId,
+          model: observationRecord.provided_model_name,
+        })
+      : null;
 
     const final_usage_details = this.getUsageUnits(
       observationRecord,
@@ -619,7 +624,7 @@ export class IngestionService {
       final_usage_details.usage_details ?? {},
     );
 
-    logger.info(
+    logger.debug(
       `Calculated costs and usage for observation ${observationRecord.id} with model ${internalModel?.id}`,
       {
         cost: final_cost_details.cost_details,
@@ -667,7 +672,7 @@ export class IngestionService {
         model,
       });
 
-      logger.info(
+      logger.debug(
         `Tokenized observation ${observationRecord.id} with model ${model.id}, input: ${newInputCount}, output: ${newOutputCount}`,
       );
 
@@ -923,12 +928,6 @@ export class IngestionService {
     const { traceEventList, projectId, entityId } = params;
 
     return traceEventList.map((trace) => {
-      if (!trace.body?.timestamp) {
-        logger.warn(
-          `Trace ${entityId} in project ${projectId} does not have a timestamp, using event time`,
-        );
-      }
-
       const traceRecord: TraceRecordInsertType = {
         id: entityId,
         timestamp: this.getMillisecondTimestamp(
@@ -945,6 +944,7 @@ export class IngestionService {
         release: trace.body.release,
         version: trace.body.version,
         project_id: projectId,
+        environment: trace.body.environment,
         public: trace.body.public ?? false,
         bookmarked: false,
         tags: trace.body.tags ?? [],
@@ -1047,17 +1047,13 @@ export class IngestionService {
           : {}),
       };
 
-      if (obs.type?.endsWith("-create") && !obs.body?.startTime) {
-        logger.warn(
-          `Observation ${entityId} in project ${projectId} does not have a startTime, using event time`,
-        );
-      }
-
       const observationRecord: ObservationRecordInsertType = {
         id: entityId,
         trace_id: obs.body.traceId ?? v4(),
         type: observationType,
         name: obs.body.name,
+        environment:
+          "environment" in obs.body ? obs.body.environment : "default",
         start_time: this.getMillisecondTimestamp(
           obs.body.startTime ?? obs.timestamp,
         ),

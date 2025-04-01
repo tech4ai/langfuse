@@ -346,9 +346,7 @@ export const getScoresUiCount = async (props: {
   offset?: number;
 }) => {
   const rows = await getScoresUiGeneric<{ count: string }>({
-    select: `
-    count(*) as count
-    `,
+    select: "count",
     tags: { kind: "count" },
     ...props,
   });
@@ -372,6 +370,7 @@ export const getScoresUiTable = async (props: {
   const rows = await getScoresUiGeneric<{
     id: string;
     project_id: string;
+    environment: string;
     name: string;
     value: number;
     string_value: string | null;
@@ -393,37 +392,14 @@ export const getScoresUiTable = async (props: {
     created_at: string;
     updated_at: string;
   }>({
-    select: `
-        s.id,
-        s.project_id,
-        s.name,
-        s.value,
-        s.string_value,
-        s.timestamp,
-        s.source,
-        s.data_type,
-        s.comment,
-        s.trace_id,
-        s.observation_id,
-        s.author_user_id,
-        t.user_id,
-        t.name,
-        t.tags,
-        s.created_at,
-        s.updated_at,
-        s.source,
-        s.config_id,
-        s.queue_id,
-        t.user_id,
-        t.name as trace_name,
-        t.tags as trace_tags
-    `,
+    select: "rows",
     tags: { kind: "analytic" },
     ...props,
   });
 
   return rows.map((row) => ({
     projectId: row.project_id,
+    environment: row.environment,
     authorUserId: row.author_user_id,
     traceId: row.trace_id,
     observationId: row.observation_id,
@@ -446,7 +422,7 @@ export const getScoresUiTable = async (props: {
 };
 
 export const getScoresUiGeneric = async <T>(props: {
-  select: string;
+  select: "count" | "rows";
   projectId: string;
   filter: FilterState;
   orderBy: OrderByState;
@@ -454,25 +430,56 @@ export const getScoresUiGeneric = async <T>(props: {
   offset?: number;
   tags?: Record<string, string>;
 }): Promise<T[]> => {
-  const { select, projectId, filter, orderBy, limit, offset } = props;
+  const { projectId, filter, orderBy, limit, offset } = props;
 
-  const { tracesFilter, scoresFilter, observationsFilter } =
-    getProjectIdDefaultFilter(projectId, { tracesPrefix: "t" });
+  const select =
+    props.select === "count"
+      ? "count(*) as count"
+      : `
+        s.id,
+        s.project_id,
+        s.environment,
+        s.name,
+        s.value,
+        s.string_value,
+        s.timestamp,
+        s.source,
+        s.data_type,
+        s.comment,
+        s.trace_id,
+        s.observation_id,
+        s.author_user_id,
+        t.user_id,
+        t.name,
+        t.tags,
+        s.created_at,
+        s.updated_at,
+        s.source,
+        s.config_id,
+        s.queue_id,
+        t.user_id,
+        t.name as trace_name,
+        t.tags as trace_tags
+      `;
 
+  const { scoresFilter } = getProjectIdDefaultFilter(projectId, {
+    tracesPrefix: "t",
+  });
   scoresFilter.push(
     ...createFilterFromFilterState(filter, scoresTableUiColumnDefinitions),
   );
-
   const scoresFilterRes = scoresFilter.apply();
 
-  // TODO: Can we realistically apply a traces time filter here? Is an order by event_ts a risk?
+  // Only join traces for rows or if there is a trace filter on counts
+  const performTracesJoin =
+    props.select === "rows" ||
+    scoresFilter.some((f) => f.clickhouseTable === "traces");
+
   const query = `
       SELECT 
           ${select}
       FROM scores s final
-      LEFT JOIN traces t
-      ON s.trace_id = t.id 
-      AND t.project_id = s.project_id
+      ${performTracesJoin ? "LEFT JOIN traces t ON s.trace_id = t.id AND t.project_id = s.project_id" : ""}
       WHERE s.project_id = {projectId: String}
       ${scoresFilterRes?.query ? `AND ${scoresFilterRes.query}` : ""}
       ${orderByToClickhouseSql(orderBy ?? null, scoresTableUiColumnDefinitions)}
@@ -547,17 +554,17 @@ export const getScoreNames = async (
   }));
 };
 
-export const deleteScore = async (projectId: string, scoreId: string) => {
+export const deleteScores = async (projectId: string, scoreIds: string[]) => {
   const query = `
     DELETE FROM scores
     WHERE project_id = {projectId: String}
-    AND id = {scoreId: String};
+    AND id in ({scoreIds: Array(String)});
   `;
   await commandClickhouse({
     query: query,
     params: {
       projectId,
-      scoreId,
+      scoreIds,
     },
     tags: {
       feature: "tracing",
@@ -767,6 +774,37 @@ export const getScoreCountsByProjectInCreationInterval = async ({
   }));
 };
 
+export const getScoreCountOfProjectsSinceCreationDate = async ({
+  projectIds,
+  start,
+}: {
+  projectIds: string[];
+  start: Date;
+}) => {
+  const query = `
+    SELECT 
+      count(*) as count
+    FROM scores
+    WHERE project_id IN ({projectIds: Array(String)})
+    AND created_at >= {start: DateTime64(3)}
+  `;
+
+  const rows = await queryClickhouse<{ count: string }>({
+    query,
+    params: {
+      projectIds,
+      start: convertDateToClickhouseDateTime(start),
+    },
+    tags: {
+      feature: "tracing",
+      type: "score",
+      kind: "analytic",
+    },
+  });
+
+  return Number(rows[0]?.count ?? 0);
+};
+
 export const getDistinctScoreNames = async (
   projectId: string,
   cutoffCreatedAt: Date,
@@ -806,6 +844,49 @@ export const getDistinctScoreNames = async (
   });
 
   return rows.map((row) => row.name);
+};
+
+export const getScoresForBlobStorageExport = function (
+  projectId: string,
+  minTimestamp: Date,
+  maxTimestamp: Date,
+) {
+  const query = `
+    SELECT
+      id,
+      timestamp,
+      project_id,
+      environment,
+      trace_id,
+      observation_id,
+      name,
+      value,
+      source,
+      comment,
+      data_type,
+      string_value
+    FROM scores FINAL
+    WHERE project_id = {projectId: String}
+    AND timestamp >= {minTimestamp: DateTime64(3)}
+    AND timestamp <= {maxTimestamp: DateTime64(3)}
+  `;
+
+  const records = queryClickhouseStream<Record<string, unknown>>({
+    query,
+    params: {
+      projectId,
+      minTimestamp: convertDateToClickhouseDateTime(minTimestamp),
+      maxTimestamp: convertDateToClickhouseDateTime(maxTimestamp),
+    },
+    tags: {
+      feature: "blobstorage",
+      type: "score",
+      kind: "analytic",
+      projectId,
+    },
+  });
+
+  return records;
 };
 
 export const getScoresForPostHog = async function* (
@@ -849,6 +930,13 @@ export const getScoresForPostHog = async function* (
       kind: "analytic",
       projectId,
     },
+    clickhouseConfigs: {
+      request_timeout: 300_000, // 5 minutes
+      clickhouse_settings: {
+        join_algorithm: "grace_hash",
+        grace_hash_join_initial_buckets: "32",
+      },
+    },
   });
 
   const baseUrl = env.NEXTAUTH_URL?.replace("/api/auth", "");
@@ -874,4 +962,28 @@ export const getScoresForPostHog = async function* (
       },
     };
   }
+};
+
+export const hasAnyScore = async (projectId: string) => {
+  const query = `
+    SELECT 1
+    FROM scores
+    WHERE project_id = {projectId: String}
+    LIMIT 1
+  `;
+
+  const rows = await queryClickhouse<{ 1: number }>({
+    query,
+    params: {
+      projectId,
+    },
+    tags: {
+      feature: "tracing",
+      type: "score",
+      kind: "hasAny",
+      projectId,
+    },
+  });
+
+  return rows.length > 0;
 };

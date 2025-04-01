@@ -9,7 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/src/components/ui/dropdown-menu";
-import { DeleteButton } from "@/src/components/deleteButton";
+import { DeleteDatasetButton } from "@/src/components/deleteButton";
 import { DuplicateDatasetButton } from "@/src/features/datasets/components/DuplicateDatasetButton";
 import { useState } from "react";
 import { MultiSelectKeyValues } from "@/src/features/scores/components/multi-select-key-values";
@@ -134,7 +134,7 @@ export default function Dataset() {
           : undefined,
         tabsComponent: (
           <TabsBar value="runs">
-            <TabsBarList className="justify-start">
+            <TabsBarList>
               <TabsBarTrigger value="runs">Runs</TabsBarTrigger>
               <TabsBarTrigger value="items" asChild>
                 <Link
@@ -146,7 +146,7 @@ export default function Dataset() {
             </TabsBarList>
           </TabsBar>
         ),
-        actionButtonsRight: [
+        actionButtonsRight: (
           <>
             <Dialog
               open={isCreateExperimentDialogOpen}
@@ -159,7 +159,7 @@ export default function Dataset() {
                   onClick={() => capture("dataset_run:new_form_open")}
                 >
                   <FlaskConical className="h-4 w-4" />
-                  <span className="ml-2">New experiment</span>
+                  <span className="ml-2 hidden md:block">New experiment</span>
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-h-[90vh] overflow-y-auto">
@@ -216,7 +216,7 @@ export default function Dataset() {
               <PopoverTrigger asChild>
                 <Button variant="outline">
                   <FolderKanban className="mr-2 h-4 w-4" />
-                  Dataset details
+                  <span className="hidden md:block">Dataset details</span>
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="mx-2 max-h-[50vh] w-[50vw] overflow-y-auto md:w-[25vw]">
@@ -265,21 +265,17 @@ export default function Dataset() {
                   />
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <DeleteButton
+                  <DeleteDatasetButton
                     itemId={datasetId}
                     projectId={projectId}
-                    isTableAction={false}
-                    scope="datasets:CUD"
-                    invalidateFunc={() => void utils.datasets.invalidate()}
-                    type="dataset"
                     redirectUrl={`/project/${projectId}/datasets`}
                     deleteConfirmation={dataset.data?.name}
                   />
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </>,
-        ],
+          </>
+        ),
       }}
     >
       <DatasetRunsTable
